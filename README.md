@@ -140,8 +140,6 @@ Deliverable:
 
 * Event taxonomy and topic design document
 
-# Milestone 2 — Event Design (Kafka)
-
 ## Purpose
 
 This milestone focuses on designing **domain events** that represent immutable facts about the system.
@@ -431,6 +429,77 @@ Deliverable:
 
 * High-level module and dependency diagram
 
+* Define NestJS modules and their responsibilities
+  * Task API Module
+    * Accepts task creation requests
+    * Validates input and business rules
+    * Emits TaskAccepted events
+    * Does not enqueue jobs or execute tasks
+  * Event Producer Module
+    * Responsible for publishing events to Kafka
+    * Guarantees event schema and ordering (by taskId)
+    * Used by API and workers
+    * Contains no business logic
+  * Diary / Event Consumer Module
+    * Consumes Kafka events
+    * Builds projections (task status, history, metrics)
+    * Stores derived state
+    * Must be fully replayable
+  * Dispatch Module
+    * Observes task lifecycle via Kafka
+    * Decides when a task should be dispatched
+    * Sends execution commands to RabbitMQ
+    * Enforces idempotency (dispatch once per attempt)
+  * Worker Module
+    * Consumes jobs from RabbitMQ
+    * Executes tasks
+    * Emits execution events to Kafka
+    * Acknowledges or rejects jobs
+
+---
+
+* Decide which modules produce or consume events
+  * Produce events to Kafka
+    * Task API Module
+    * Worker Module
+    * Dispatch Module (for dispatch-related facts)
+  * Consume events from Kafka
+    * Diary / Event Consumer Module
+    * Dispatch Module (read-only decision making)
+  * Consume messages from RabbitMQ
+    * Worker Module only
+
+---
+
+* Identify forbidden dependencies between modules
+  * Task API Module must not depend on:
+    * RabbitMQ
+    * Worker logic
+    * Projections or read models
+  * Worker Module must not depend on:
+    * Kafka consumers or projections
+    * Task API logic
+    * Other workers
+  * Diary / Event Consumer Module must not:
+    * Produce commands
+    * Trigger side effects
+    * Call RabbitMQ
+  * Dispatch Module must not:
+    * Execute tasks
+    * Modify projections directly
+
+---
+
+Decide which logic belongs outside NestJS
+Kafka brokers and RabbitMQ infrastructure
+Task execution logic (business work)
+Message retry policies and broker-level guarantees
+Operational concerns (scaling, deployment, monitoring)
+NestJS is responsible for:
+Orchestration
+Boundary enforcement
+Event flow coordination
+
 ---
 
 ### Milestone 5 — Failure Scenarios & Resilience
@@ -450,6 +519,60 @@ Deliverable:
 
 ---
 
+* Simulate Kafka failures, RabbitMQ failures, and worker crashes
+  * Kafka unavailable
+    * Task API must reject task creation
+    * No task is accepted without being recorded
+    * Workers must not acknowledge jobs if events cannot be written
+    * System prefers rejection over silent loss
+  * RabbitMQ unavailable
+    * Task acceptance still succeeds
+    * Task is recorded in Kafka only
+    * Dispatch is deferred and retried later
+    * No task execution occurs without queue confirmation
+  * Worker crash before ACK
+    * RabbitMQ re-queues the job
+    * Another worker may pick it up
+    * Duplicate execution is possible
+    * History reflects all attempts
+  * Worker crash after ACK but before completion
+    * Task remains incomplete
+    * No completion event exists
+    * Monitoring detects a stuck execution
+
+---
+
+* **Define system behavior under partial outages**
+  * Kafka down → system becomes read-only or rejects writes
+  * RabbitMQ down → system continues recording intent
+  * Workers down → backlog grows, no data loss
+  * Projections down → execution continues, visibility degraded
+* The system sacrifices availability before correctness.
+
+---
+
+* **Define idempotency rules and duplicate handling**
+  * Event producers must use deterministic keys (taskId)
+  * Consumers must tolerate duplicate events
+  * Dispatch logic must ensure:
+    * One dispatch per task attempt
+    * Safe reprocessing on restart
+  * Workers must treat tasks as idempotent or externally protected
+  * Duplicates are allowed. Corruption is not.
+
+---
+
+* **Validate that replay does not cause corruption**
+  * Replaying Kafka events:
+    * Rebuilds projections
+    * Recomputes metrics
+    * Does not enqueue jobs
+    * Does not execute tasks
+  * Any side effect on replay is a design violation
+  * Replay must be safe, repeatable, and deterministic.
+
+---
+
 ### Milestone 6 — Observability & Trust
 
 **Goal:** Be able to explain and prove system behavior.
@@ -466,6 +589,43 @@ Deliverable:
 
 ---
 
+* **Define what questions the system must answer**
+  * What is the current state of a given task?
+  * When was the task accepted, dispatched, started, retried, completed, or failed?
+  * Which worker handled each execution attempt?
+  * How many attempts has a task had, and why?
+  * Are there tasks stuck in a particular state?
+  * What failures are happening most often?
+  * How long do tasks take end-to-end?
+  * Did the system behave correctly during an outage?
+
+---
+
+* **Identify critical metrics and signals**
+  * Task acceptance rate
+  * Dispatch latency (accepted → dispatched)
+  * Execution latency (dispatched → completed/failed)
+  * Success vs failure rate
+  * Retry count per task
+  * Permanently failed task count
+  * Worker throughput and failure rate
+  * Tasks without terminal events after a threshold
+  * Event production and consumption lag
+  * All metrics must be derived from Kafka events, not queue depth alone.
+
+---
+
+* **Decide how task state is reconstructed from events**
+  * Task state is not stored directly
+  * State is derived by replaying events in order per taskId
+  * Each event transitions the task to a new derived state
+  * Conflicting or unexpected sequences are preserved, not hidden
+  * Projections represent the latest known state
+  * Projections can be deleted and rebuilt at any time
+  * Truth is reconstructed, not assumed.
+
+---
+
 ### Milestone 7 — Implementation Readiness
 
 **Goal:** Be confident before writing code.
@@ -479,6 +639,52 @@ Tasks:
 Deliverable:
 
 * Final implementation plan
+
+---
+
+* Map concepts to NestJS constructs
+  * Modules
+    * Task API → Controller + Application Service
+    * Event production → Dedicated Kafka producer service
+    * Event consumption → Kafka consumer modules per projection
+    * Dispatch logic → Stateless application service triggered by events
+    * Worker → Separate NestJS application or standalone service
+  * Providers
+    * Event publishers
+    * Projection builders
+    * Idempotency guards
+    * Policy evaluators (retry, dispatch rules)
+  * Boundaries
+    * Controllers handle input only
+    * Services coordinate actions
+    * No business rules in infrastructure adapters
+
+---
+
+* **Decide deployment and scaling strategy**
+  * Separate deployables for:
+    * API / Event producer
+    * Dispatch service
+    * Worker service
+    * Projection/Read-model service
+  * Scale API by request load
+  * Scale workers independently by queue depth
+  * Scale consumers by Kafka partitions
+  * Treat Kafka and RabbitMQ as shared infrastructure
+  * Scaling is horizontal and role-based, not monolithic.
+
+---
+
+* **Confirm separation of concerns is enforced**
+  * Kafka is the system of record
+  * RabbitMQ is execution only
+  * NestJS coordinates, not owns, business truth
+  * Workers do not read history
+  * Projections do not cause side effects
+  * Replay remains safe under all conditions
+* If any component is removed:
+  * History remains intact
+  * The system can recover
 
 ---
 
