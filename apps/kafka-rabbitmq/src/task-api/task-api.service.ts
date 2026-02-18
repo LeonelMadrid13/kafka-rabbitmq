@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
-import { KafkaService } from '../kafka/kafka.service';
-import { TaskEventType } from '../kafka/events/task-events';
+import { KafkaService } from '@app/kafka';
+import { TaskEventType } from '@app/events';
 
 @Injectable()
 export class TaskApiService {
@@ -12,7 +12,6 @@ export class TaskApiService {
   async createTask(payload: any): Promise<string> {
     const taskId = uuidv4();
 
-    // Publish TaskAccepted event to Kafka
     await this.kafkaService.publishEvent(
       'task-lifecycle',
       {
@@ -21,7 +20,7 @@ export class TaskApiService {
         timestamp: new Date(),
         payload,
       },
-      taskId, // Use taskId as key for ordering
+      taskId,
     );
 
     this.logger.log(`Task accepted: ${taskId}`);

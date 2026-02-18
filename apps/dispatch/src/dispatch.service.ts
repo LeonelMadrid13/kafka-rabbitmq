@@ -1,8 +1,7 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
-import { KafkaService } from '../kafka/kafka.service';
-import { RabbitmqService } from '../rabbitmq/rabbitmq.service';
-import { TaskEventType } from '../kafka/events/task-events';
-import { retry } from 'rxjs';
+import { KafkaService } from '@app/kafka';
+import { RabbitmqService } from '@app/rabbitmq';
+import { TaskEventType } from '@app/events';
 
 @Injectable()
 export class DispatchService implements OnModuleInit {

@@ -6,31 +6,19 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-  "build": "nest build",
-  "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\"",
-  
-  "start:api": "nest start kafka-rabbitmq",
-  "start:dispatch": "nest start dispatch",
-  "start:worker": "nest start worker",
-  "start:recovery": "nest start recovery",
-  
-  "start:dev:api": "nest start kafka-rabbitmq --watch",
-  "start:dev:dispatch": "nest start dispatch --watch",
-  "start:dev:worker": "nest start worker --watch",
-  "start:dev:recovery": "nest start recovery --watch",
-  
-  "build:api": "nest build kafka-rabbitmq",
-  "build:dispatch": "nest build dispatch",
-  "build:worker": "nest build worker",
-  "build:recovery": "nest build recovery",
-  
-  "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
-  "test": "jest",
-  "test:watch": "jest --watch",
-  "test:cov": "jest --coverage",
-  "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-  "test:e2e": "jest --config ./apps/kafka-rabbitmq/test/jest-e2e.json"
-},
+    "build": "nest build",
+    "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\"",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch",
+    "start:prod": "node dist/apps/kafka-rabbitmq/main",
+    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
+    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
+    "test:e2e": "jest --config ./apps/kafka-rabbitmq/test/jest-e2e.json"
+  },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
