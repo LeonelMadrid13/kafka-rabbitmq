@@ -10,6 +10,15 @@
   "monorepo": true,
   "root": "apps/kafka-rabbitmq",
   "projects": {
+    "dashboard": {
+      "type": "application",
+      "root": "apps/dashboard",
+      "entryFile": "main",
+      "sourceRoot": "apps/dashboard/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/dashboard/tsconfig.app.json"
+      }
+    },
     "dispatch": {
       "type": "application",
       "root": "apps/dispatch",

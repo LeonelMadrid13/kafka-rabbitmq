@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task Processing Dashboard</title>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Monaco', 'Menlo', monospace;
+      background: #0a0e27;
+      color: #00ff41;
+      padding: 20px;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+      font-size: 2.5em;
+      text-shadow: 0 0 10px #00ff41;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .card {
+      background: #1a1f3a;
+      border: 2px solid #00ff41;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 0 20px rgba(0, 255, 65, 0.3);
+    }
+
+    .card h2 {
+      margin-bottom: 15px;
+      font-size: 1.5em;
+      border-bottom: 2px solid #00ff41;
+      padding-bottom: 10px;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #2a3f5a;
+    }
+
+    .stat-label {
+      color: #7fdbff;
+    }
+
+    .stat-value {
+      font-weight: bold;
+      color: #00ff41;
+    }
+
+    .workers-list {
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .worker-item {
+      padding: 5px 10px;
+      margin: 5px 0;
+      background: #2a3f5a;
+      border-radius: 5px;
+      font-size: 0.9em;
+    }
+
+    .status-active {
+      color: #00ff41;
+    }
+
+    .status-inactive {
+      color: #ff6b6b;
+    }
+
+    .load-test-form {
+      background: #1a1f3a;
+      border: 2px solid #00ff41;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: #7fdbff;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px;
+      background: #0a0e27;
+      border: 1px solid #00ff41;
+      color: #00ff41;
+      border-radius: 5px;
+      font-family: inherit;
+    }
+
+    button {
+      background: #00ff41;
+      color: #0a0e27;
+      border: none;
+      padding: 12px 30px;
+      font-size: 1.1em;
+      font-weight: bold;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.3s;
+      font-family: inherit;
+    }
+
+    button:hover {
+      background: #00cc33;
+      box-shadow: 0 0 15px #00ff41;
+    }
+
+    button:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+
+    .test-batch {
+      background: #2a3f5a;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 5px;
+      border-left: 4px solid #00ff41;
+    }
+
+    .test-batch.completed {
+      border-left-color: #7fdbff;
+    }
+
+    .progress-bar {
+      background: #0a0e27;
+      height: 20px;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 5px;
+    }
+
+    .progress-fill {
+      background: linear-gradient(90deg, #00ff41, #7fdbff);
+      height: 100%;
+      transition: width 0.3s;
+    }
+
+    .connection-status {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      padding: 10px 20px;
+      border-radius: 5px;
+      font-weight: bold;
+    }
+
+    .connected {
+      background: #00ff41;
+      color: #0a0e27;
+    }
+
+    .disconnected {
+      background: #ff6b6b;
+      color: white;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .updating {
+      animation: pulse 1s infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="connection-status" id="connectionStatus">
+    <span class="disconnected">Disconnected</span>
+  </div>
+
+  <div class="container">
+    <h1>📊 Task Processing Dashboard</h1>
+
+    <!-- Load Test Controls -->
+    <div class="load-test-form">
+      <h2>🚀 Load Test Controls</h2>
+      <div class="form-group">
+        <label for="tasks">Total Tasks:</label>
+        <input type="number" id="tasks" value="100" min="1">
+      </div>
+      <div class="form-group">
+        <label for="concurrency">Concurrency:</label>
+        <input type="number" id="concurrency" value="10" min="1">
+      </div>
+      <div class="form-group">
+        <label for="delay">Delay (ms):</label>
+        <input type="number" id="delay" value="100" min="0">
+      </div>
+      <button id="startTest" onclick="startLoadTest()">Start Load Test</button>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="grid">
+      <!-- Workers Card -->
+      <div class="card">
+        <h2>👷 Workers</h2>
+        <div class="stat-row">
+          <span class="stat-label">Active:</span>
+          <span class="stat-value" id="activeWorkers">0</span>
+        </div>
+        <div class="workers-list" id="workersList">
+          <div style="color: #7fdbff; padding: 10px;">No workers active</div>
+        </div>
+      </div>
+
+      <!-- Tasks Card -->
+      <div class="card">
+        <h2>📥 Tasks</h2>
+        <div class="stat-row">
+          <span class="stat-label">Accepted:</span>
+          <span class="stat-value" id="accepted">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Dispatched:</span>
+          <span class="stat-value" id="dispatched">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Started:</span>
+          <span class="stat-value" id="started">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Completed:</span>
+          <span class="stat-value" id="completed">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">In Progress:</span>
+          <span class="stat-value" id="inProgress">0</span>
+        </div>
+      </div>
+
+      <!-- Rates Card -->
+      <div class="card">
+        <h2>📊 Success Rates</h2>
+        <div class="stat-row">
+          <span class="stat-label">Success Rate:</span>
+          <span class="stat-value" id="successRate">0%</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Failure Rate:</span>
+          <span class="stat-value" id="failureRate">0%</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Retry Success:</span>
+          <span class="stat-value" id="retrySuccessRate">0%</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Avg Retries:</span>
+          <span class="stat-value" id="avgRetries">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Test Batches -->
+    <div class="card">
+      <h2>🎯 Test Batches</h2>
+      <div id="testBatches">
+        <div style="color: #7fdbff; padding: 10px;">No active test batches</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io('http://localhost:4000');
+    
+    socket.on('connect', () => {
+      document.getElementById('connectionStatus').innerHTML = '<span class="connected">Connected</span>';
+    });
+
+    socket.on('disconnect', () => {
+      document.getElementById('connectionStatus').innerHTML = '<span class="disconnected">Disconnected</span>';
+    });
+
+    socket.on('stats', (stats) => {
+      updateDashboard(stats);
+    });
+
+    function updateDashboard(stats) {
+      // Workers
+      document.getElementById('activeWorkers').textContent = stats.workers.active;
+      
+      const workersList = document.getElementById('workersList');
+      if (stats.workers.list.length === 0) {
+        workersList.innerHTML = '<div style="color: #7fdbff; padding: 10px;">No workers active</div>';
+      } else {
+        workersList.innerHTML = stats.workers.list.map(w => {
+          const secondsAgo = Math.floor((Date.now() - w.lastSeen) / 1000);
+          const status = secondsAgo < 15 ? 'active' : 'inactive';
+          const statusText = secondsAgo < 15 ? '(active)' : `(${secondsAgo}s ago)`;
+          return `<div class="worker-item status-${status}">${w.id.substring(0, 20)} ${statusText}</div>`;
+        }).join('');
+      }
+
+      // Tasks
+      document.getElementById('accepted').textContent = stats.tasks.accepted;
+      document.getElementById('dispatched').textContent = stats.tasks.dispatched;
+      document.getElementById('started').textContent = stats.tasks.started;
+      document.getElementById('completed').textContent = stats.tasks.completed;
+      document.getElementById('inProgress').textContent = stats.tasks.inProgress;
+
+      // Rates
+      document.getElementById('successRate').textContent = stats.rates.successRate + '%';
+      document.getElementById('failureRate').textContent = stats.rates.failureRate + '%';
+      document.getElementById('retrySuccessRate').textContent = stats.rates.retrySuccessRate + '%';
+      document.getElementById('avgRetries').textContent = stats.rates.avgRetries;
+
+      // Test Batches
+      const batchesDiv = document.getElementById('testBatches');
+      if (stats.testBatches.length === 0) {
+        batchesDiv.innerHTML = '<div style="color: #7fdbff; padding: 10px;">No active test batches</div>';
+      } else {
+        batchesDiv.innerHTML = stats.testBatches.map(batch => {
+          const progress = (batch.completedTasks / batch.totalTasks * 100).toFixed(1);
+          const isComplete = batch.endTime !== undefined;
+          const statusClass = isComplete ? 'completed' : '';
+          
+          let content = `<div class="test-batch ${statusClass}">`;
+          content += `<strong>Batch ${batch.id.substring(0, 12)}</strong><br>`;
+          content += `Progress: ${batch.completedTasks}/${batch.totalTasks} (${progress}%)<br>`;
+          
+          if (isComplete) {
+            const duration = (batch.duration / 1000).toFixed(2);
+            content += `✅ Completed in ${duration}s (${batch.throughput} tasks/s)`;
+          } else {
+            content += `<div class="progress-bar"><div class="progress-fill" style="width: ${progress}%"></div></div>`;
+          }
+          
+          content += `</div>`;
+          return content;
+        }).join('');
+      }
+    }
+
+    async function startLoadTest() {
+      const tasks = parseInt(document.getElementById('tasks').value);
+      const concurrency = parseInt(document.getElementById('concurrency').value);
+      const delay = parseInt(document.getElementById('delay').value);
+      
+      const button = document.getElementById('startTest');
+      button.disabled = true;
+      button.textContent = 'Starting...';
+
+      try {
+        const response = await fetch('http://localhost:4000/api/load-test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tasks, concurrency, delay }),
+        });
+
+        const result = await response.json();
+        
+        if (result.success) {
+          alert(`Load test started! Test ID: ${result.testId}`);
+        } else {
+          alert('Failed to start load test');
+        }
+      } catch (error) {
+        alert('Error: ' + error.message);
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Start Load Test';
+      }
+    }
+  </script>
+</body>
+</html>
