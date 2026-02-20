@@ -1,12 +1,18 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  Logger,
+} from '@nestjs/common';
 import { KafkaService } from '@app/kafka';
 import { RabbitmqService } from '@app/rabbitmq';
 import { TaskEventType } from '@app/events';
 
 @Injectable()
-export class WorkerService implements OnModuleInit {
+export class WorkerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(WorkerService.name);
   private readonly workerId = `worker-${process.pid}`;
+  private heartbeatInterval: NodeJS.Timeout;
 
   constructor(
     private readonly kafkaService: KafkaService,
@@ -14,11 +20,18 @@ export class WorkerService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    // Send initial heartbeat
+    await this.sendHeartbeat('started');
+
+    // Send heartbeat every 10 seconds
+    this.heartbeatInterval = setInterval(() => {
+      this.sendHeartbeat('active');
+    }, 10000);
+
     await this.rabbitmqService.consumeTasks(async (task, ack, nack) => {
       const { taskId, payload } = task;
 
       try {
-        // Record start
         await this.kafkaService.publishEvent(
           'task-lifecycle',
           {
@@ -30,10 +43,8 @@ export class WorkerService implements OnModuleInit {
           taskId,
         );
 
-        // DO THE ACTUAL WORK
         const result = await this.executeTask(payload);
 
-        // Record success
         await this.kafkaService.publishEvent(
           'task-lifecycle',
           {
@@ -46,14 +57,11 @@ export class WorkerService implements OnModuleInit {
           taskId,
         );
 
-        // ACK to RabbitMQ (delete the task)
         ack();
-
         this.logger.log(`Task completed: ${taskId}`);
       } catch (error) {
         this.logger.error(`Task failed: ${taskId}`, error);
 
-        // Record failure
         await this.kafkaService.publishEvent(
           'task-lifecycle',
           {
@@ -66,7 +74,6 @@ export class WorkerService implements OnModuleInit {
           taskId,
         );
 
-        // NACK to RabbitMQ (requeue for retry)
         nack();
       }
     });
@@ -74,9 +81,36 @@ export class WorkerService implements OnModuleInit {
     this.logger.log(`✅ Worker ${this.workerId} started`);
   }
 
+  async onModuleDestroy() {
+    // Send shutdown heartbeat
+    await this.sendHeartbeat('stopped');
+
+    // Clear heartbeat interval
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+
+    this.logger.log(`Worker ${this.workerId} shutting down`);
+  }
+
+  private async sendHeartbeat(status: 'started' | 'active' | 'stopped') {
+    try {
+      await this.kafkaService.publishEvent(
+        'worker-heartbeat',
+        {
+          type: 'WorkerHeartbeat',
+          workerId: this.workerId,
+          timestamp: new Date(),
+          status,
+        },
+        this.workerId,
+      );
+    } catch (error) {
+      // Don't log heartbeat errors to avoid spam
+    }
+  }
+
   private async executeTask(payload: any): Promise<any> {
-    // YOUR BUSINESS LOGIC HERE
-    // Simulate work
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     return {

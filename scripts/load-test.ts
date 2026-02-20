@@ -2,23 +2,23 @@
 
 /**
  * LOAD TEST SCRIPT
- * 
+ *
  * This script sends multiple concurrent requests to test:
  * - API throughput
  * - Kafka write performance
  * - RabbitMQ queue depth
  * - Worker processing capacity
- * 
+ *
  * Usage:
  *   npx ts-node scripts/load-test.ts
  *   npx ts-node scripts/load-test.ts --tasks=100 --concurrency=10
  */
 
 interface LoadTestOptions {
-  tasks: number;        // Total number of tasks to create
-  concurrency: number;  // How many at once
-  apiUrl: string;       // API endpoint
-  delayMs: number;      // Delay between batches
+  tasks: number; // Total number of tasks to create
+  concurrency: number; // How many at once
+  apiUrl: string; // API endpoint
+  delayMs: number; // Delay between batches
 }
 
 const DEFAULT_OPTIONS: LoadTestOptions = {
@@ -28,7 +28,12 @@ const DEFAULT_OPTIONS: LoadTestOptions = {
   delayMs: 100,
 };
 
-async function createTask(taskNumber: number, apiUrl: string): Promise<any> {
+async function createTask(
+  taskNumber: number,
+  apiUrl: string,
+  testBatchId: string,
+  totalTasks: number,
+): Promise<any> {
   const payload = {
     message: `Load test task #${taskNumber}`,
     priority: ['low', 'medium', 'high'][Math.floor(Math.random() * 3)],
@@ -37,10 +42,14 @@ async function createTask(taskNumber: number, apiUrl: string): Promise<any> {
       timestamp: new Date().toISOString(),
       randomData: Math.random().toString(36).substring(7),
     },
+    metadata: {
+      testBatchId,
+      totalTasks,
+    },
   };
 
   const startTime = Date.now();
-  
+
   try {
     const response = await fetch(apiUrl, {
       method: 'POST',
@@ -73,8 +82,11 @@ async function createTask(taskNumber: number, apiUrl: string): Promise<any> {
 }
 
 async function runLoadTest(options: LoadTestOptions) {
+  const testBatchId = `test-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
   console.log('🚀 Starting Load Test');
   console.log('━'.repeat(50));
+  console.log(`Test Batch ID: ${testBatchId}`);
   console.log(`Total tasks: ${options.tasks}`);
   console.log(`Concurrency: ${options.concurrency}`);
   console.log(`API: ${options.apiUrl}`);
@@ -95,11 +107,13 @@ async function runLoadTest(options: LoadTestOptions) {
     const batchNumber = Math.floor(i / options.concurrency) + 1;
     const totalBatches = Math.ceil(options.tasks / options.concurrency);
 
-    console.log(`📦 Batch ${batchNumber}/${totalBatches}: Creating ${batchSize} tasks...`);
+    console.log(
+      `📦 Batch ${batchNumber}/${totalBatches}: Creating ${batchSize} tasks...`,
+    );
 
     // Create batch of tasks concurrently
     const promises = Array.from({ length: batchSize }, (_, j) =>
-      createTask(i + j + 1, options.apiUrl)
+      createTask(i + j + 1, options.apiUrl, testBatchId, options.tasks),
     );
 
     const batchResults = await Promise.all(promises);
@@ -110,27 +124,32 @@ async function runLoadTest(options: LoadTestOptions) {
       if (result.success) {
         results.successful++;
         results.durations.push(result.duration);
-        console.log(`  ✅ Task #${result.taskNumber}: ${result.taskId} (${result.duration}ms)`);
+        console.log(
+          `  ✅ Task #${result.taskNumber}: ${result.taskId} (${result.duration}ms)`,
+        );
       } else {
         results.failed++;
-        console.log(`  ❌ Task #${result.taskNumber}: ${result.error} (${result.duration}ms)`);
+        console.log(
+          `  ❌ Task #${result.taskNumber}: ${result.error} (${result.duration}ms)`,
+        );
       }
     }
 
     // Progress
-    const progress = ((i + batchSize) / options.tasks * 100).toFixed(1);
+    const progress = (((i + batchSize) / options.tasks) * 100).toFixed(1);
     console.log(`  Progress: ${progress}%`);
     console.log('');
 
     // Delay between batches (don't overwhelm the system)
     if (i + options.concurrency < options.tasks) {
-      await new Promise(resolve => setTimeout(resolve, options.delayMs));
+      await new Promise((resolve) => setTimeout(resolve, options.delayMs));
     }
   }
 
   // Calculate statistics
   const totalTime = Date.now() - results.startTime;
-  const avgDuration = results.durations.reduce((a, b) => a + b, 0) / results.durations.length;
+  const avgDuration =
+    results.durations.reduce((a, b) => a + b, 0) / results.durations.length;
   const minDuration = Math.min(...results.durations);
   const maxDuration = Math.max(...results.durations);
   const throughput = (results.successful / (totalTime / 1000)).toFixed(2);
@@ -142,7 +161,9 @@ async function runLoadTest(options: LoadTestOptions) {
   console.log(`Total tasks:      ${results.total}`);
   console.log(`Successful:       ${results.successful} ✅`);
   console.log(`Failed:           ${results.failed} ❌`);
-  console.log(`Success rate:     ${(results.successful / results.total * 100).toFixed(1)}%`);
+  console.log(
+    `Success rate:     ${((results.successful / results.total) * 100).toFixed(1)}%`,
+  );
   console.log('');
   console.log('⏱️  TIMING');
   console.log('━'.repeat(50));
@@ -198,7 +219,7 @@ Examples:
 
 // Run the test
 const options = parseArgs();
-runLoadTest(options).catch(error => {
+runLoadTest(options).catch((error) => {
   console.error('❌ Load test failed:', error);
   process.exit(1);
 });
